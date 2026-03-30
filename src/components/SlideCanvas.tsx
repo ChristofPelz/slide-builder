@@ -1,57 +1,168 @@
-import type { Slide, SlideBlock } from '../types/slide';
-import { KPIBlock } from './KPIBlock';
-import { ChartBlock } from './ChartBlock';
-import { TableBlock } from './TableBlock';
-import { TextBlock } from './TextBlock';
+import React, { forwardRef } from "react";
+import type { SlideConfig, SlideBlock } from "../types/slide";
+import type { Theme } from "../types/theme";
+import { KPIBlock } from "./blocks/KPIBlock";
+import { ChartBlock } from "./blocks/ChartBlock";
+import { TableBlock } from "./blocks/TableBlock";
+import { TextBlock } from "./blocks/TextBlock";
+import { ImageBlock } from "./blocks/ImageBlock";
 
-const SLIDE_WIDTH = 1280;
-const SLIDE_HEIGHT = 720;
+// 16:9 base dimensions — Playwright renders at exactly these px
+export const SLIDE_WIDTH = 1280;
+export const SLIDE_HEIGHT = 720;
 
-interface Props {
-  slide: Slide;
-  /** Scale factor for display (e.g. 0.5 renders at 640×360). Defaults to 1. */
+interface SlideCanvasProps {
+  slide: SlideConfig;
+  theme: Theme;
   scale?: number;
+  isEditing?: boolean;
+  onBlockSelect?: (blockId: string | null) => void;
+  selectedBlockId?: string | null;
 }
 
-function renderBlock(block: SlideBlock) {
-  switch (block.type) {
-    case 'kpi':
-      return <KPIBlock key={block.id} block={block} />;
-    case 'chart':
-      return <ChartBlock key={block.id} block={block} />;
-    case 'table':
-      return <TableBlock key={block.id} block={block} />;
-    case 'text':
-      return <TextBlock key={block.id} block={block} />;
-  }
-}
+export const SlideCanvas = forwardRef<HTMLDivElement, SlideCanvasProps>(
+  ({ slide, theme, scale = 1, isEditing = false, onBlockSelect, selectedBlockId }, ref) => {
 
-export function SlideCanvas({ slide, scale = 1 }: Props) {
-  return (
-    <div
-      style={{
+    const renderBlock = (block: SlideBlock) => {
+      const isSelected = selectedBlockId === block.id;
+      const wrapStyle: React.CSSProperties = {
+        position: "absolute",
+        left: block.x,
+        top: block.y,
+        width: block.width,
+        height: block.height,
+        boxSizing: "border-box",
+        borderRadius: `${theme.borderRadius}px`,
+        overflow: "hidden",
+        outline: isEditing && isSelected ? `2px solid ${theme.accent}` : "none",
+        outlineOffset: "2px",
+        cursor: isEditing ? "pointer" : "default",
+        zIndex: block.zIndex ?? 1,
+      };
+
+      const handleClick = (e: React.MouseEvent) => {
+        if (isEditing && onBlockSelect) {
+          e.stopPropagation();
+          onBlockSelect(block.id);
+        }
+      };
+
+      let inner: React.ReactNode;
+      switch (block.type) {
+        case "kpi":    inner = <KPIBlock    block={block} theme={theme} />; break;
+        case "chart":  inner = <ChartBlock  block={block} theme={theme} />; break;
+        case "table":  inner = <TableBlock  block={block} theme={theme} />; break;
+        case "text":   inner = <TextBlock   block={block} theme={theme} />; break;
+        case "image":  inner = <ImageBlock  block={block} theme={theme} />; break;
+        default:       return null;
+      }
+
+      return (
+        <div key={block.id} style={wrapStyle} onClick={handleClick}>
+          {inner}
+        </div>
+      );
+    };
+
+    return (
+      <div style={{
         width: SLIDE_WIDTH * scale,
         height: SLIDE_HEIGHT * scale,
-        overflow: 'hidden',
+        overflow: "hidden",
         flexShrink: 0,
-      }}
-    >
-      {/* Inner layer rendered at full 1280×720, then scaled down */}
-      <div
-        style={{
-          width: SLIDE_WIDTH,
-          height: SLIDE_HEIGHT,
-          position: 'relative',
-          background: slide.backgroundColor ?? '#0f172a',
-          transformOrigin: 'top left',
-          transform: `scale(${scale})`,
-          fontFamily: "'Inter', 'Segoe UI', sans-serif",
-        }}
-      >
-        {slide.blocks.map(renderBlock)}
-      </div>
-    </div>
-  );
-}
+      }}>
+        <div
+          ref={ref}
+          data-slide-canvas
+          style={{
+            position: "relative",
+            width: SLIDE_WIDTH,
+            height: SLIDE_HEIGHT,
+            background: slide.backgroundImage
+              ? `url(${slide.backgroundImage}) center/cover no-repeat`
+              : slide.backgroundColor ?? theme.background,
+            fontFamily: theme.fontBody,
+            overflow: "hidden",
+            transform: `scale(${scale})`,
+            transformOrigin: "top left",
+            flexShrink: 0,
+          }}
+          onClick={() => isEditing && onBlockSelect?.(null)}
+        >
+          {/* Header bar */}
+          {slide.showHeader !== false && (
+            <div style={{
+              position: "absolute",
+              top: 0, left: 0, right: 0,
+              height: "56px",
+              background: theme.primary,
+              display: "flex", alignItems: "center",
+              paddingLeft: "40px", paddingRight: "40px",
+              justifyContent: "space-between",
+              zIndex: 10,
+            }}>
+              <div style={{
+                fontFamily: theme.fontHeading,
+                fontSize: "22px", fontWeight: 700,
+                color: "#FFFFFF",
+                letterSpacing: "0.04em", textTransform: "uppercase",
+              }}>
+                {slide.title}
+              </div>
+              {slide.subtitle && (
+                <div style={{
+                  fontFamily: theme.fontBody,
+                  fontSize: "13px",
+                  color: "rgba(255,255,255,0.65)",
+                  letterSpacing: "0.02em",
+                }}>
+                  {slide.subtitle}
+                </div>
+              )}
+              {theme.logo && (
+                <img src={theme.logo} alt="Logo" style={{ height: "32px", objectFit: "contain" }} />
+              )}
+            </div>
+          )}
 
-export { SLIDE_WIDTH, SLIDE_HEIGHT };
+          {/* Accent line under header */}
+          {slide.showHeader !== false && (
+            <div style={{
+              position: "absolute",
+              top: "56px", left: 0, right: 0,
+              height: "3px",
+              background: theme.accent,
+              zIndex: 10,
+            }} />
+          )}
+
+          {/* Blocks */}
+          {slide.blocks.map(renderBlock)}
+
+          {/* Footer */}
+          {slide.showFooter !== false && (
+            <div style={{
+              position: "absolute",
+              bottom: 0, left: 0, right: 0,
+              height: "32px",
+              background: theme.surface,
+              borderTop: "1px solid rgba(0,0,0,0.06)",
+              display: "flex", alignItems: "center",
+              paddingLeft: "40px", paddingRight: "40px",
+              justifyContent: "space-between",
+            }}>
+              <span style={{ fontSize: "11px", color: theme.textMuted, fontFamily: theme.fontBody }}>
+                {slide.footerLeft ?? "INVARIA Finanzmanagement"}
+              </span>
+              <span style={{ fontSize: "11px", color: theme.textMuted, fontFamily: theme.fontBody }}>
+                {slide.footerRight ?? new Date().toLocaleDateString("de-DE", { month: "long", year: "numeric" })}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+);
+
+SlideCanvas.displayName = "SlideCanvas";

@@ -1,82 +1,129 @@
-import { useState, useEffect, useCallback } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import type { Presentation, Slide } from '../types/slide';
+// hooks/useSlideData.ts
+// Fetches live data from Supabase or MSSQL proxy and injects into block configs
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
+import { useEffect, useState, useCallback } from "react";
+import { createClient } from "@supabase/supabase-js";
+import type { QueryConfig, SlideBlock, ChartBlock, KPIBlock } from "../types/slide";
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL ?? "",
+  import.meta.env.VITE_SUPABASE_ANON_KEY ?? ""
+);
 
-interface UseSlideDataReturn {
-  presentation: Presentation | null;
-  currentSlide: Slide | null;
-  currentSlideIndex: number;
-  loading: boolean;
-  error: string | null;
-  setCurrentSlideIndex: (index: number) => void;
-  savePresentation: (presentation: Presentation) => Promise<void>;
-  loadPresentation: (id: string) => Promise<void>;
+// ─── Supabase Query ───────────────────────────────────────────
+async function fetchFromSupabase(q: QueryConfig): Promise<Record<string, unknown>[]> {
+  if (q.sql) {
+    // Raw SQL via Supabase RPC (requires a Postgres function `run_query(sql_text text)`)
+    const { data, error } = await supabase.rpc("run_query", { sql_text: q.sql });
+    if (error) throw error;
+    return data as Record<string, unknown>[];
+  }
+
+  let query = supabase.from(q.table!).select("*");
+  if (q.filters) {
+    for (const [key, value] of Object.entries(q.filters)) {
+      query = query.eq(key, value);
+    }
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as Record<string, unknown>[];
 }
 
-export function useSlideData(presentationId?: string): UseSlideDataReturn {
-  const [presentation, setPresentation] = useState<Presentation | null>(null);
-  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+// ─── MSSQL Proxy ─────────────────────────────────────────────
+// Express server: POST http://localhost:4001/query
+async function fetchFromMSSQL(q: QueryConfig): Promise<Record<string, unknown>[]> {
+  const resp = await fetch("http://localhost:4001/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sql: q.sql, table: q.table, filters: q.filters }),
+  });
+  if (!resp.ok) throw new Error(`MSSQL proxy error: ${resp.status}`);
+  return resp.json() as Promise<Record<string, unknown>[]>;
+}
+
+// ─── Data → Block mapping ─────────────────────────────────────
+function applyDataToBlock(
+  block: SlideBlock,
+  data: Record<string, unknown>[],
+  query: QueryConfig
+): SlideBlock {
+  if (block.type === "chart") {
+    const cb = block as ChartBlock;
+    const labels = data.map((r) => String(r[query.labelColumn ?? "label"]));
+    const values = data.map((r) => Number(r[query.valueColumn ?? "value"]));
+    return {
+      ...cb,
+      labels,
+      datasets: [{ ...cb.datasets[0], data: values }],
+    };
+  }
+
+  if (block.type === "kpi") {
+    const kb = block as KPIBlock;
+    const agg = query.aggregation ?? "sum";
+    const col = query.valueColumn ?? "value";
+    const aggregated =
+      agg === "avg"   ? data.reduce((acc, r) => acc + Number(r[col]), 0) / (data.length || 1) :
+      agg === "count" ? data.length :
+      agg === "max"   ? Math.max(...data.map((r) => Number(r[col]))) :
+      agg === "min"   ? Math.min(...data.map((r) => Number(r[col]))) :
+                        data.reduce((acc, r) => acc + Number(r[col]), 0); // sum
+    return { ...kb, value: aggregated };
+  }
+
+  return block;
+}
+
+// ─── Hook ─────────────────────────────────────────────────────
+export function useSlideData(
+  blocks: SlideBlock[],
+  queries: QueryConfig[]
+): { resolvedBlocks: SlideBlock[]; loading: boolean; error: string | null; refresh: () => void } {
+  const [resolvedBlocks, setResolvedBlocks] = useState<SlideBlock[]>(blocks);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadPresentation = useCallback(async (id: string) => {
+  const fetchAll = useCallback(async () => {
+    const queryMap = new Map(queries.map((q) => [q.id, q]));
+    const needsData = blocks.filter(
+      (b) => (b as ChartBlock | KPIBlock).queryId &&
+        queryMap.has((b as ChartBlock | KPIBlock).queryId!)
+    );
+
+    if (needsData.length === 0) {
+      setResolvedBlocks(blocks);
+      return;
+    }
+
     setLoading(true);
     setError(null);
-    try {
-      const { data, error: sbError } = await supabase
-        .from('presentations')
-        .select('*')
-        .eq('id', id)
-        .single();
 
-      if (sbError) throw sbError;
-      setPresentation(data as Presentation);
-      setCurrentSlideIndex(0);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load presentation');
+    try {
+      const updated = await Promise.all(
+        blocks.map(async (block) => {
+          const qid = (block as ChartBlock | KPIBlock).queryId;
+          if (!qid) return block;
+          const query = queryMap.get(qid);
+          if (!query) return block;
+
+          const data =
+            query.source === "mssql"
+              ? await fetchFromMSSQL(query)
+              : await fetchFromSupabase(query);
+
+          return applyDataToBlock(block, data, query);
+        })
+      );
+      setResolvedBlocks(updated);
+    } catch (e) {
+      setError(String(e));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [blocks, queries]);
 
-  const savePresentation = useCallback(async (pres: Presentation) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { error: sbError } = await supabase
-        .from('presentations')
-        .upsert({ ...pres, updatedAt: new Date().toISOString() });
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
-      if (sbError) throw sbError;
-      setPresentation(pres);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save presentation');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (presentationId) {
-      loadPresentation(presentationId);
-    }
-  }, [presentationId, loadPresentation]);
-
-  const currentSlide = presentation?.slides[currentSlideIndex] ?? null;
-
-  return {
-    presentation,
-    currentSlide,
-    currentSlideIndex,
-    loading,
-    error,
-    setCurrentSlideIndex,
-    savePresentation,
-    loadPresentation,
-  };
+  return { resolvedBlocks, loading, error, refresh: fetchAll };
 }

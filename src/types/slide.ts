@@ -1,4 +1,5 @@
-export type BlockType = 'kpi' | 'chart' | 'table' | 'text';
+// ─── Block Types ──────────────────────────────────────────────
+export type BlockType = "kpi" | "chart" | "table" | "text" | "image";
 
 export interface BaseBlock {
   id: string;
@@ -7,54 +8,129 @@ export interface BaseBlock {
   y: number;
   width: number;
   height: number;
+  zIndex?: number;
 }
 
+// KPI / Metric card
 export interface KPIBlock extends BaseBlock {
-  type: 'kpi';
+  type: "kpi";
   label: string;
-  value: number | string;
+  value: string | number;
   unit?: string;
-  trend?: number; // percentage change
+  delta?: number;           // e.g. +5.2 (%)
+  deltaLabel?: string;      // e.g. "vs. Vorjahr"
+  trend?: "up" | "down" | "neutral";
+  format?: "currency" | "percent" | "number";
+  prefix?: string;          // e.g. "€"
+  variant?: "default" | "highlight" | "dark";
+  queryId?: string;
+}
+
+// Chart block
+export type ChartType = "bar" | "line" | "pie" | "donut" | "area" | "waterfall";
+
+export interface ChartDataset {
+  label: string;
+  data: number[];
+  color?: string;
 }
 
 export interface ChartBlock extends BaseBlock {
-  type: 'chart';
-  chartType: 'bar' | 'line' | 'pie' | 'area';
-  data: Array<Record<string, unknown>>;
-  xKey: string;
-  yKeys: string[];
+  type: "chart";
+  chartType: ChartType;
   title?: string;
+  labels: string[];           // X axis / category labels
+  datasets: ChartDataset[];
+  showLegend?: boolean;
+  showGrid?: boolean;
+  yAxisLabel?: string;
+  formatY?: "currency" | "percent" | "number";
+  queryId?: string;
+}
+
+// Table block
+export interface TableColumn {
+  key: string;
+  label: string;
+  align?: "left" | "right" | "center";
+  format?: "currency" | "percent" | "number" | "text";
+  width?: number;
 }
 
 export interface TableBlock extends BaseBlock {
-  type: 'table';
-  columns: Array<{ key: string; header: string; align?: 'left' | 'right' | 'center' }>;
-  rows: Array<Record<string, unknown>>;
+  type: "table";
   title?: string;
+  columns: TableColumn[];
+  rows: Record<string, string | number>[];
+  highlightLast?: boolean;  // Summenzeile hervorheben
+  showHeader?: boolean;
+  striped?: boolean;
 }
+
+// Text / Headline block
+export type TextVariant = "h1" | "h2" | "body" | "caption" | "quote";
 
 export interface TextBlock extends BaseBlock {
-  type: 'text';
+  type: "text";
   content: string;
-  fontSize?: number;
-  fontWeight?: 'normal' | 'bold';
+  variant?: TextVariant;
+  align?: "left" | "center" | "right";
   color?: string;
-  align?: 'left' | 'center' | 'right';
+  bold?: boolean;
 }
 
-export type SlideBlock = KPIBlock | ChartBlock | TableBlock | TextBlock;
+// Image / Logo block
+export interface ImageBlock extends BaseBlock {
+  type: "image";
+  src: string;
+  objectFit?: "contain" | "cover" | "fill";
+  alt?: string;
+}
 
-export interface Slide {
+export type SlideBlock =
+  | KPIBlock
+  | ChartBlock
+  | TableBlock
+  | TextBlock
+  | ImageBlock;
+
+// ─── Slide Config ─────────────────────────────────────────────
+export interface SlideConfig {
   id: string;
   title: string;
+  subtitle?: string;
   blocks: SlideBlock[];
   backgroundColor?: string;
+  backgroundImage?: string;
+  showHeader?: boolean;
+  showFooter?: boolean;
+  footerLeft?: string;
+  footerRight?: string;
+  notes?: string;
 }
 
+// ─── Presentation ─────────────────────────────────────────────
 export interface Presentation {
   id: string;
-  title: string;
-  slides: Slide[];
+  name: string;
+  themeId: string;
+  slides: SlideConfig[];
   createdAt: string;
   updatedAt: string;
+}
+
+// ─── DB Query Config ──────────────────────────────────────────
+export type DataSourceType = "supabase" | "mssql" | "static";
+
+export interface QueryConfig {
+  id: string;
+  name: string;
+  source: DataSourceType;
+  sql?: string;
+  table?: string;
+  filters?: Record<string, unknown>;
+  valueColumn?: string;
+  labelColumn?: string;
+  aggregation?: "sum" | "avg" | "count" | "max" | "min";
+  groupBy?: string;
 }
