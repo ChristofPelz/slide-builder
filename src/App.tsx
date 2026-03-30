@@ -1,12 +1,13 @@
 import React, { useState, useRef, useCallback } from "react";
 import { SlideCanvas, SLIDE_WIDTH, SLIDE_HEIGHT } from "./components/SlideCanvas";
+import { PropertiesPanel } from "./components/PropertiesPanel";
 import { defaultTheme } from "./types/theme";
 import type { Theme } from "./types/theme";
-import type { SlideConfig, KPIBlock, ChartBlock, TableBlock, TextBlock } from "./types/slide";
+import type { SlideConfig, SlideBlock, KPIBlock, ChartBlock, TableBlock, TextBlock } from "./types/slide";
 import "./App.css";
 
 // ─── Demo Slides ──────────────────────────────────────────────
-const exampleSlides: SlideConfig[] = [
+const initialSlides: SlideConfig[] = [
   {
     id: "s1",
     title: "Quartalsbericht Q1 2025",
@@ -89,13 +90,13 @@ const exampleSlides: SlideConfig[] = [
           { key: "abw",  label: "Abw. %",      align: "right", format: "percent" },
         ],
         rows: [
-          { pos: "Erlöse aus LuL",                 jan:  1_480_000, feb:  1_620_000, mar:  1_720_000, sum:  4_820_000, vj:  4_470_000, abw:  7.3 },
-          { pos: "Sonstige betriebliche Erträge",  jan:     28_000, feb:     32_000, mar:     25_000, sum:     85_000, vj:     91_000, abw: -6.6 },
-          { pos: "Materialaufwand",                jan:   -420_000, feb:   -470_000, mar:   -490_000, sum: -1_380_000, vj: -1_260_000, abw:  9.5 },
-          { pos: "Personalaufwand",                jan:   -510_000, feb:   -510_000, mar:   -510_000, sum: -1_530_000, vj: -1_450_000, abw:  5.5 },
-          { pos: "Abschreibungen",                 jan:   -180_000, feb:   -180_000, mar:   -180_000, sum:   -540_000, vj:   -520_000, abw:  3.8 },
-          { pos: "Sonstige Aufwendungen",          jan:   -148_000, feb:   -162_000, mar:   -172_000, sum:   -482_000, vj:   -441_000, abw:  9.3 },
-          { pos: "EBIT",                           jan:    250_000, feb:    330_000, mar:    393_000, sum:    973_000, vj:    890_000, abw:  9.3 },
+          { pos: "Erlöse aus LuL",                jan: 1_480_000, feb: 1_620_000, mar: 1_720_000, sum: 4_820_000, vj: 4_470_000, abw: 7.3 },
+          { pos: "Sonstige betriebliche Erträge", jan:    28_000, feb:    32_000, mar:    25_000, sum:    85_000, vj:    91_000, abw: -6.6 },
+          { pos: "Materialaufwand",               jan:  -420_000, feb:  -470_000, mar:  -490_000, sum:-1_380_000, vj:-1_260_000, abw: 9.5 },
+          { pos: "Personalaufwand",               jan:  -510_000, feb:  -510_000, mar:  -510_000, sum:-1_530_000, vj:-1_450_000, abw: 5.5 },
+          { pos: "Abschreibungen",                jan:  -180_000, feb:  -180_000, mar:  -180_000, sum:  -540_000, vj:  -520_000, abw: 3.8 },
+          { pos: "Sonstige Aufwendungen",         jan:  -148_000, feb:  -162_000, mar:  -172_000, sum:  -482_000, vj:  -441_000, abw: 9.3 },
+          { pos: "EBIT",                          jan:   250_000, feb:   330_000, mar:   393_000, sum:   973_000, vj:   890_000, abw: 9.3 },
         ],
         x: 40, y: 108, width: 1200, height: 568,
       } as TableBlock,
@@ -113,8 +114,8 @@ const exampleSlides: SlideConfig[] = [
         title: "Kontostand (€)",
         labels: ["Okt", "Nov", "Dez", "Jan", "Feb", "Mär", "Apr (P)", "Mai (P)", "Jun (P)"],
         datasets: [
-          { label: "Ist / Plan",            data: [1_800_000, 2_100_000, 1_750_000, 2_340_000, 2_150_000, 2_340_000, 2_500_000, 2_680_000, 2_820_000] },
-          { label: "Minimum (Covenant)",    data: [1_200_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000] },
+          { label: "Ist / Plan",         data: [1_800_000, 2_100_000, 1_750_000, 2_340_000, 2_150_000, 2_340_000, 2_500_000, 2_680_000, 2_820_000] },
+          { label: "Minimum (Covenant)", data: [1_200_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000] },
         ],
         showGrid: true, showLegend: true, formatY: "currency",
         x: 40, y: 76, width: 740, height: 580,
@@ -155,8 +156,8 @@ function SlideThumbnail({ slide, theme, active, index, onClick }: {
   slide: SlideConfig; theme: Theme; active: boolean; index: number; onClick: () => void;
 }) {
   const THUMB_W = 200;
-  const THUMB_H = 112;
   const scale = THUMB_W / SLIDE_WIDTH;
+  const THUMB_H = SLIDE_HEIGHT * scale;
 
   return (
     <div onClick={onClick} style={{ cursor: "pointer", display: "flex", flexDirection: "column", gap: "6px", alignItems: "center" }}>
@@ -179,18 +180,44 @@ function SlideThumbnail({ slide, theme, active, index, onClick }: {
 
 // ─── Main App ─────────────────────────────────────────────────
 export default function App() {
-  const [slides] = useState<SlideConfig[]>(exampleSlides);
+  const [slides, setSlides] = useState<SlideConfig[]>(initialSlides);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [theme] = useState<Theme>(defaultTheme);
   const [isPresentMode, setIsPresentMode] = useState(false);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const current = slides[currentIdx];
-  const previewScale = 0.72;
+
+  // Deselect when switching slides
+  const switchSlide = (idx: number) => {
+    setCurrentIdx(idx);
+    setSelectedBlockId(null);
+  };
+
+  const selectedBlock = selectedBlockId
+    ? current.blocks.find((b) => b.id === selectedBlockId) ?? null
+    : null;
+
+  // Update a single block in the current slide
+  const updateBlock = useCallback((partial: Partial<SlideBlock>) => {
+    setSlides((prev) =>
+      prev.map((slide, i) =>
+        i !== currentIdx ? slide : {
+          ...slide,
+          blocks: slide.blocks.map((b) =>
+            b.id === selectedBlockId ? { ...b, ...partial } as SlideBlock : b
+          ),
+        }
+      )
+    );
+  }, [currentIdx, selectedBlockId]);
 
   const handleExportPDF = useCallback(() => {
-    alert("PDF-Export läuft über den Server:\nPOST /api/export-pdf\n\nPlaywright rendert jede Folie in 1280×720 px und erzeugt ein Drucklayout.");
+    alert("PDF-Export läuft über den Server:\nPOST /api/export-pdf\n\nPlaywright rendert jede Folie in 1280×720 px.");
   }, []);
+
+  const previewScale = 0.72;
 
   // ─ Präsentationsmodus ─
   if (isPresentMode) {
@@ -215,7 +242,7 @@ export default function App() {
 
       {/* Thumbnail-Sidebar */}
       <div style={{
-        width: "240px", flexShrink: 0,
+        width: "224px", flexShrink: 0,
         background: "#0F1318",
         borderRight: "1px solid rgba(255,255,255,0.07)",
         display: "flex", flexDirection: "column",
@@ -225,12 +252,12 @@ export default function App() {
           FOLIEN
         </div>
         {slides.map((slide, i) => (
-          <SlideThumbnail key={slide.id} slide={slide} theme={theme} active={i === currentIdx} index={i} onClick={() => setCurrentIdx(i)} />
+          <SlideThumbnail key={slide.id} slide={slide} theme={theme} active={i === currentIdx} index={i} onClick={() => switchSlide(i)} />
         ))}
       </div>
 
       {/* Hauptbereich */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
 
         {/* Toolbar */}
         <div style={{
@@ -240,25 +267,64 @@ export default function App() {
           display: "flex", alignItems: "center",
           paddingLeft: "20px", paddingRight: "20px", gap: "12px",
         }}>
-          <span style={{ color: "rgba(255,255,255,0.7)", fontSize: "14px", fontWeight: 500, flex: 1 }}>
+          <span style={{ color: "rgba(255,255,255,0.7)", fontSize: "14px", fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {current.title}
           </span>
-          <span style={{ color: "rgba(255,255,255,0.3)", fontSize: "12px" }}>Folie {currentIdx + 1} von {slides.length}</span>
+          {selectedBlock && (
+            <span style={{ fontSize: "11px", color: theme.accent, background: "rgba(232,160,32,0.12)", borderRadius: "4px", padding: "2px 8px", whiteSpace: "nowrap" }}>
+              {selectedBlock.type} · {selectedBlock.id}
+            </span>
+          )}
+          <span style={{ color: "rgba(255,255,255,0.3)", fontSize: "12px", whiteSpace: "nowrap" }}>
+            {currentIdx + 1} / {slides.length}
+          </span>
           <button onClick={() => setIsPresentMode(true)} style={toolbarBtn}>▶ Präsentieren</button>
           <button onClick={handleExportPDF} style={{ ...toolbarBtn, background: theme.accent, color: "#0F1318", borderColor: theme.accent }}>↓ PDF</button>
         </div>
 
-        {/* Canvas-Vorschau */}
-        <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px" }}>
-          <div style={{
-            width: SLIDE_WIDTH * previewScale,
-            height: SLIDE_HEIGHT * previewScale,
-            flexShrink: 0,
-            boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.4)",
-            borderRadius: "4px", overflow: "hidden",
-          }}>
-            <SlideCanvas ref={canvasRef} slide={current} theme={theme} scale={previewScale} />
+        {/* Canvas-Vorschau + Properties nebeneinander */}
+        <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+          {/* Canvas */}
+          <div style={{ flex: 1, overflow: "auto", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px" }}>
+            <div style={{
+              width: SLIDE_WIDTH * previewScale,
+              height: SLIDE_HEIGHT * previewScale,
+              flexShrink: 0,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.4)",
+              borderRadius: "4px", overflow: "hidden",
+            }}>
+              <SlideCanvas
+                ref={canvasRef}
+                slide={current}
+                theme={theme}
+                scale={previewScale}
+                isEditing={true}
+                selectedBlockId={selectedBlockId}
+                onBlockSelect={setSelectedBlockId}
+              />
+            </div>
           </div>
+
+          {/* Properties Panel */}
+          {selectedBlock ? (
+            <PropertiesPanel
+              block={selectedBlock}
+              theme={theme}
+              onUpdate={updateBlock}
+            />
+          ) : (
+            <div style={{
+              width: "264px", flexShrink: 0,
+              background: "#0F1318",
+              borderLeft: "1px solid rgba(255,255,255,0.07)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <div style={{ textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: "12px", padding: "24px" }}>
+                <div style={{ fontSize: "28px", marginBottom: "10px" }}>↖</div>
+                Block im Canvas<br />anklicken zum Bearbeiten
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Unternavigation */}
@@ -268,16 +334,16 @@ export default function App() {
           borderTop: "1px solid rgba(255,255,255,0.07)",
           display: "flex", alignItems: "center", justifyContent: "center", gap: "12px",
         }}>
-          <button onClick={() => setCurrentIdx(Math.max(0, currentIdx - 1))} disabled={currentIdx === 0} style={navBtn}>← Zurück</button>
+          <button onClick={() => switchSlide(Math.max(0, currentIdx - 1))} disabled={currentIdx === 0} style={navBtn}>← Zurück</button>
           {slides.map((_, i) => (
-            <div key={i} onClick={() => setCurrentIdx(i)} style={{
+            <div key={i} onClick={() => switchSlide(i)} style={{
               width: i === currentIdx ? "20px" : "6px", height: "6px",
               borderRadius: "3px",
               background: i === currentIdx ? theme.accent : "rgba(255,255,255,0.2)",
               cursor: "pointer", transition: "all 0.2s",
             }} />
           ))}
-          <button onClick={() => setCurrentIdx(Math.min(slides.length - 1, currentIdx + 1))} disabled={currentIdx === slides.length - 1} style={navBtn}>Weiter →</button>
+          <button onClick={() => switchSlide(Math.min(slides.length - 1, currentIdx + 1))} disabled={currentIdx === slides.length - 1} style={navBtn}>Weiter →</button>
         </div>
       </div>
     </div>
@@ -295,7 +361,7 @@ const toolbarBtn: React.CSSProperties = {
   border: "1px solid rgba(255,255,255,0.2)",
   color: "rgba(255,255,255,0.8)", borderRadius: "6px",
   padding: "6px 14px", fontSize: "12px", cursor: "pointer",
-  letterSpacing: "0.02em",
+  letterSpacing: "0.02em", whiteSpace: "nowrap",
 };
 const navBtn: React.CSSProperties = {
   background: "transparent", border: "none",
