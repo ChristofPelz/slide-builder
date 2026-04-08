@@ -4,8 +4,8 @@ import {
   AreaChart, Area,
   PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer,
 } from "recharts";
+import { useEffect, useRef, useState } from "react";
 import type { ChartBlock as ChartBlockType } from "../../types/slide";
 import type { Theme } from "../../types/theme";
 
@@ -34,6 +34,32 @@ function formatYTick(value: number, format?: string): string {
 
 export function ChartBlock({ block, theme }: Props) {
   const { chartType, labels, datasets, title, showLegend = true, showGrid = true, formatY } = block;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [chartSize, setChartSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) {
+      return;
+    }
+
+    const updateSizeState = () => {
+      const { width, height } = node.getBoundingClientRect();
+      setChartSize({
+        width: Math.max(0, Math.floor(width)),
+        height: Math.max(0, Math.floor(height)),
+      });
+    };
+
+    updateSizeState();
+
+    const observer = new ResizeObserver(() => {
+      updateSizeState();
+    });
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   const COLORS = [theme.secondary, theme.accent, "#6366f1", "#22c55e", "#f43f5e", "#06b6d4"];
 
@@ -44,11 +70,11 @@ export function ChartBlock({ block, theme }: Props) {
   const gridProps = showGrid ? { strokeDasharray: "3 3", stroke: "rgba(0,0,0,0.08)" } : undefined;
   const tooltipStyle = { background: theme.surface, border: `1px solid rgba(0,0,0,0.1)`, borderRadius: "6px", fontSize: "12px" };
 
-  const renderChart = () => {
+  const renderChart = (width: number, height: number) => {
     if (chartType === "pie" || chartType === "donut") {
       const pieData = labels.map((name, i) => ({ name, value: datasets[0]?.data[i] ?? 0 }));
       return (
-        <PieChart>
+        <PieChart width={width} height={height}>
           <Pie
             data={pieData}
             dataKey="value"
@@ -56,7 +82,7 @@ export function ChartBlock({ block, theme }: Props) {
             cx="50%" cy="50%"
             outerRadius={chartType === "donut" ? "65%" : "70%"}
             innerRadius={chartType === "donut" ? "38%" : 0}
-            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+            label={({ name, percent }: any) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
             labelLine={true}
           >
             {pieData.map((_, i) => (
@@ -70,11 +96,11 @@ export function ChartBlock({ block, theme }: Props) {
 
     if (chartType === "bar") {
       return (
-        <BarChart data={data}>
+        <BarChart data={data} width={width} height={height}>
           {gridProps && <CartesianGrid {...gridProps} />}
           <XAxis dataKey="label" tick={axisStyle} />
           <YAxis tick={axisStyle} tickFormatter={(v) => formatYTick(v, formatY)} width={70} />
-          <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => formatYTick(v, formatY)} />
+          <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => formatYTick(v as number, formatY)} />
           {showLegend && <Legend wrapperStyle={{ fontSize: "11px", fontFamily: theme.fontBody }} />}
           {dataKeys.map((key, i) => (
             <Bar key={key} dataKey={key} fill={datasets[i]?.color ?? COLORS[i % COLORS.length]} radius={[3, 3, 0, 0]} />
@@ -85,11 +111,11 @@ export function ChartBlock({ block, theme }: Props) {
 
     if (chartType === "line") {
       return (
-        <LineChart data={data}>
+        <LineChart data={data} width={width} height={height}>
           {gridProps && <CartesianGrid {...gridProps} />}
           <XAxis dataKey="label" tick={axisStyle} />
           <YAxis tick={axisStyle} tickFormatter={(v) => formatYTick(v, formatY)} width={70} />
-          <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => formatYTick(v, formatY)} />
+          <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => formatYTick(v as number, formatY)} />
           {showLegend && <Legend wrapperStyle={{ fontSize: "11px", fontFamily: theme.fontBody }} />}
           {dataKeys.map((key, i) => (
             <Line key={key} type="monotone" dataKey={key} stroke={datasets[i]?.color ?? COLORS[i % COLORS.length]} strokeWidth={2} dot={false} />
@@ -100,11 +126,11 @@ export function ChartBlock({ block, theme }: Props) {
 
     // area (default)
     return (
-      <AreaChart data={data}>
+      <AreaChart data={data} width={width} height={height}>
         {gridProps && <CartesianGrid {...gridProps} />}
         <XAxis dataKey="label" tick={axisStyle} />
         <YAxis tick={axisStyle} tickFormatter={(v) => formatYTick(v, formatY)} width={70} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => formatYTick(v, formatY)} />
+        <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => formatYTick(v as number, formatY)} />
         {showLegend && <Legend wrapperStyle={{ fontSize: "11px", fontFamily: theme.fontBody }} />}
         {dataKeys.map((key, i) => {
           const color = datasets[i]?.color ?? COLORS[i % COLORS.length];
@@ -119,6 +145,8 @@ export function ChartBlock({ block, theme }: Props) {
   return (
     <div style={{
       width: "100%", height: "100%",
+      minWidth: 0,
+      minHeight: 0,
       background: theme.surface,
       borderRadius: `${theme.borderRadius}px`,
       padding: "12px",
@@ -135,10 +163,10 @@ export function ChartBlock({ block, theme }: Props) {
           {title}
         </span>
       )}
-      <div style={{ flex: 1 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          {renderChart() as React.ReactElement}
-        </ResponsiveContainer>
+      <div ref={containerRef} style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
+        {chartSize.width > 1 && chartSize.height > 1 ? (
+          renderChart(chartSize.width, chartSize.height) as React.ReactElement
+        ) : null}
       </div>
     </div>
   );

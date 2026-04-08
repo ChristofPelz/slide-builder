@@ -65,6 +65,7 @@ export interface TableBlock extends BaseBlock {
   highlightLast?: boolean;  // Summenzeile hervorheben
   showHeader?: boolean;
   striped?: boolean;
+  queryId?: string;
 }
 
 // Text / Headline block
@@ -122,6 +123,11 @@ export interface Presentation {
 // ─── DB Query Config ──────────────────────────────────────────
 export type DataSourceType = "supabase" | "mssql" | "static";
 
+export interface QueryFilter {
+  key: string;
+  value: string;
+}
+
 export interface QueryConfig {
   id: string;
   name: string;
@@ -129,8 +135,75 @@ export interface QueryConfig {
   sql?: string;
   table?: string;
   filters?: Record<string, unknown>;
+  selectedColumns?: string[];
   valueColumn?: string;
+  valueColumns?: string[];
   labelColumn?: string;
   aggregation?: "sum" | "avg" | "count" | "max" | "min";
   groupBy?: string;
+  limit?: number;
+}
+
+export interface ColumnMetadata {
+  name: string;
+  sqlType: string;
+  nullable: boolean;
+  isNumeric: boolean;
+}
+
+export interface TableMetadata {
+  schema: string;
+  name: string;
+  fullName: string;
+  columns?: ColumnMetadata[];
+}
+
+export interface BerichtInfo {
+  Berichts_ID: number;
+  Berichtsname: string;
+}
+
+export interface QueryTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  queryConfig: QueryConfig;
+  createdAt?: string;
+  updatedAt?: string;
+  isPublic?: boolean;
+}
+
+export interface BlockTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  blockType: BlockType;
+  block: SlideBlock;
+  queryConfig?: QueryConfig;
+  createdAt?: string;
+  updatedAt?: string;
+  isPublic?: boolean;
+}
+
+// ─── Chart Templates ──────────────────────────────────────────
+export interface ChartTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  chartType: ChartType;
+  category?: "financial" | "sales" | "operations" | "general";
+  defaultConfig: Partial<ChartBlock>;
+}
+
+// ─── Slide Templates ──────────────────────────────────────────
+export interface SlideTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  blocks: SlideBlock[];
+  title: string;
+  subtitle?: string;
+  userId?: string;
+  createdAt?: string;
+  ispublic?: boolean;
 }

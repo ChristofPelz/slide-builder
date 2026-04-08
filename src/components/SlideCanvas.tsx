@@ -1,4 +1,4 @@
-import React, { forwardRef } from "react";
+import React, { forwardRef, useRef } from "react";
 import type { SlideConfig, SlideBlock } from "../types/slide";
 import type { Theme } from "../types/theme";
 import { KPIBlock } from "./blocks/KPIBlock";
@@ -18,10 +18,109 @@ interface SlideCanvasProps {
   isEditing?: boolean;
   onBlockSelect?: (blockId: string | null) => void;
   selectedBlockId?: string | null;
+  onBlockUpdate?: (blockId: string, partial: Partial<SlideBlock>) => void;
+}
+
+type InteractionMode = "drag" | "resize";
+
+interface InteractionState {
+  mode: InteractionMode;
+  blockId: string;
+  startX: number;
+  startY: number;
+  initialX: number;
+  initialY: number;
+  initialWidth: number;
+  initialHeight: number;
 }
 
 export const SlideCanvas = forwardRef<HTMLDivElement, SlideCanvasProps>(
-  ({ slide, theme, scale = 1, isEditing = false, onBlockSelect, selectedBlockId }, ref) => {
+  ({ slide, theme, scale = 1, isEditing = false, onBlockSelect, selectedBlockId, onBlockUpdate }, ref) => {
+    const interactionRef = useRef<InteractionState | null>(null);
+    const MIN_BLOCK_WIDTH = 80;
+    const MIN_BLOCK_HEIGHT = 40;
+
+    const clamp = (value: number, min: number, max: number) =>
+      Math.min(Math.max(value, min), max);
+
+    const beginInteraction = (
+      e: React.MouseEvent,
+      block: SlideBlock,
+      mode: InteractionMode
+    ) => {
+      if (!isEditing || !onBlockUpdate) {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      onBlockSelect?.(block.id);
+
+      interactionRef.current = {
+        mode,
+        blockId: block.id,
+        startX: e.clientX,
+        startY: e.clientY,
+        initialX: block.x,
+        initialY: block.y,
+        initialWidth: block.width,
+        initialHeight: block.height,
+      };
+
+      const handleMouseMove = (event: MouseEvent) => {
+        const interaction = interactionRef.current;
+        if (!interaction) {
+          return;
+        }
+
+        const dx = (event.clientX - interaction.startX) / scale;
+        const dy = (event.clientY - interaction.startY) / scale;
+
+        if (interaction.mode === "drag") {
+          const nextX = clamp(
+            interaction.initialX + dx,
+            0,
+            SLIDE_WIDTH - interaction.initialWidth
+          );
+          const nextY = clamp(
+            interaction.initialY + dy,
+            0,
+            SLIDE_HEIGHT - interaction.initialHeight
+          );
+
+          onBlockUpdate(interaction.blockId, {
+            x: Math.round(nextX),
+            y: Math.round(nextY),
+          });
+          return;
+        }
+
+        const nextWidth = clamp(
+          interaction.initialWidth + dx,
+          MIN_BLOCK_WIDTH,
+          SLIDE_WIDTH - interaction.initialX
+        );
+        const nextHeight = clamp(
+          interaction.initialHeight + dy,
+          MIN_BLOCK_HEIGHT,
+          SLIDE_HEIGHT - interaction.initialY
+        );
+
+        onBlockUpdate(interaction.blockId, {
+          width: Math.round(nextWidth),
+          height: Math.round(nextHeight),
+        });
+      };
+
+      const handleMouseUp = () => {
+        interactionRef.current = null;
+        window.removeEventListener("mousemove", handleMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
+      };
+
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+    };
 
     const renderBlock = (block: SlideBlock) => {
       const isSelected = selectedBlockId === block.id;
@@ -36,7 +135,7 @@ export const SlideCanvas = forwardRef<HTMLDivElement, SlideCanvasProps>(
         overflow: "hidden",
         outline: isEditing && isSelected ? `2px solid ${theme.accent}` : "none",
         outlineOffset: "2px",
-        cursor: isEditing ? "pointer" : "default",
+        cursor: isEditing ? "move" : "default",
         zIndex: block.zIndex ?? 1,
       };
 
@@ -58,8 +157,29 @@ export const SlideCanvas = forwardRef<HTMLDivElement, SlideCanvasProps>(
       }
 
       return (
-        <div key={block.id} style={wrapStyle} onClick={handleClick}>
+        <div
+          key={block.id}
+          style={wrapStyle}
+          onClick={handleClick}
+          onMouseDown={(e) => beginInteraction(e, block, "drag")}
+        >
           {inner}
+          {isEditing && isSelected && (
+            <div
+              onMouseDown={(e) => beginInteraction(e, block, "resize")}
+              style={{
+                position: "absolute",
+                right: 0,
+                bottom: 0,
+                width: "12px",
+                height: "12px",
+                background: theme.accent,
+                borderTopLeftRadius: "4px",
+                cursor: "nwse-resize",
+                zIndex: 12,
+              }}
+            />
+          )}
         </div>
       );
     };

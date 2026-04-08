@@ -3,23 +3,43 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
-import type { QueryConfig, SlideBlock, ChartBlock, KPIBlock } from "../types/slide";
+import type {
+  QueryConfig,
+  SlideBlock,
+  ChartBlock,
+  KPIBlock,
+  TableBlock,
+} from "../types/slide";
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL ?? "",
-  import.meta.env.VITE_SUPABASE_ANON_KEY ?? ""
-);
+let supabaseClient: ReturnType<typeof createClient> | null = null;
+
+function getSupabaseClient() {
+  if (supabaseClient) {
+    return supabaseClient;
+  }
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error("Supabase ist nicht konfiguriert. Bitte Datenquelle auf MSSQL lassen.");
+  }
+
+  supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+  return supabaseClient;
+}
 
 // ─── Supabase Query ───────────────────────────────────────────
 async function fetchFromSupabase(q: QueryConfig): Promise<Record<string, unknown>[]> {
+  const supabase = getSupabaseClient();
   if (q.sql) {
     // Raw SQL via Supabase RPC (requires a Postgres function `run_query(sql_text text)`)
-    const { data, error } = await supabase.rpc("run_query", { sql_text: q.sql });
+    const { data, error } = await (supabase as any).rpc("run_query", { sql_text: q.sql });
     if (error) throw error;
     return data as Record<string, unknown>[];
   }
 
-  let query = supabase.from(q.table!).select("*");
+  let query: any = supabase.from(q.table!).select("*");
   if (q.filters) {
     for (const [key, value] of Object.entries(q.filters)) {
       query = query.eq(key, value);
@@ -33,13 +53,29 @@ async function fetchFromSupabase(q: QueryConfig): Promise<Record<string, unknown
 // ─── MSSQL Proxy ─────────────────────────────────────────────
 // Express server: POST http://localhost:4001/query
 async function fetchFromMSSQL(q: QueryConfig): Promise<Record<string, unknown>[]> {
-  const resp = await fetch("http://localhost:4001/query", {
+  const resp = await fetch("/query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sql: q.sql, table: q.table, filters: q.filters }),
+    body: JSON.stringify({
+      sql: q.sql,
+      table: q.table,
+      filters: q.filters,
+      selectedColumns: q.selectedColumns,
+      limit: q.limit,
+    }),
   });
   if (!resp.ok) throw new Error(`MSSQL proxy error: ${resp.status}`);
-  return resp.json() as Promise<Record<string, unknown>[]>;
+  const payload = (await resp.json()) as {
+    success?: boolean;
+    data?: Record<string, unknown>[];
+    error?: string;
+  };
+
+  if (payload.success === false) {
+    throw new Error(payload.error ?? "Unknown MSSQL proxy error");
+  }
+
+  return payload.data ?? [];
 }
 
 // ─── Data → Block mapping ─────────────────────────────────────
@@ -51,11 +87,24 @@ function applyDataToBlock(
   if (block.type === "chart") {
     const cb = block as ChartBlock;
     const labels = data.map((r) => String(r[query.labelColumn ?? "label"]));
-    const values = data.map((r) => Number(r[query.valueColumn ?? "value"]));
+    const seriesColumns = query.valueColumns?.length
+      ? query.valueColumns
+      : [query.valueColumn ?? "value"];
+
+    const nextDatasets = seriesColumns.map((column, datasetIndex) => ({
+      ...(cb.datasets[datasetIndex] ?? {
+        label: column,
+        data: [],
+      }),
+      label: cb.datasets[datasetIndex]?.label ?? column,
+      color: cb.datasets[datasetIndex]?.color,
+      data: data.map((row) => Number(row[column] ?? 0)),
+    }));
+
     return {
       ...cb,
       labels,
-      datasets: [{ ...cb.datasets[0], data: values }],
+      datasets: nextDatasets,
     };
   }
 
@@ -70,6 +119,43 @@ function applyDataToBlock(
       agg === "min"   ? Math.min(...data.map((r) => Number(r[col]))) :
                         data.reduce((acc, r) => acc + Number(r[col]), 0); // sum
     return { ...kb, value: aggregated };
+  }
+
+  if (block.type === "table") {
+    const tb = block as TableBlock;
+    const selectedColumns = query.selectedColumns?.length
+      ? query.selectedColumns
+      : tb.columns.map((column) => column.key);
+
+    const columns = selectedColumns.map((column) => {
+      const existing = tb.columns.find((entry) => entry.key === column);
+      return existing ?? {
+        key: column,
+        label: column,
+        align: "left" as const,
+        format: "text" as const,
+      };
+    });
+
+    const rows = data.map((row) => {
+      const mappedRow: Record<string, string | number> = {};
+      columns.forEach((column) => {
+        const value = row[column.key];
+        mappedRow[column.key] =
+          typeof value === "number" || typeof value === "string"
+            ? value
+            : value == null
+              ? ""
+              : String(value);
+      });
+      return mappedRow;
+    });
+
+    return {
+      ...tb,
+      columns,
+      rows,
+    };
   }
 
   return block;
@@ -107,10 +193,13 @@ export function useSlideData(
           const query = queryMap.get(qid);
           if (!query) return block;
 
-          const data =
-            query.source === "mssql"
-              ? await fetchFromMSSQL(query)
-              : await fetchFromSupabase(query);
+          if (query.source === "static") {
+            return block;
+          }
+
+          const data = query.source === "mssql"
+            ? await fetchFromMSSQL(query)
+            : await fetchFromSupabase(query);
 
           return applyDataToBlock(block, data, query);
         })
